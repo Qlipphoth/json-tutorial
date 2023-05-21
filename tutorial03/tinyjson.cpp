@@ -147,10 +147,29 @@ static int tiny_parse_string(tiny_context* c, tiny_node* node){
             tiny_set_string(node, (const char*)tiny_context_pop(c, len), len);
             c->json = p; 
             return TINY_PARSE_OK;  // 成功解析
+        case '\\':
+            switch (*p++) {
+                    case '\"': PUTC(c, '\"'); break;
+                    case '\\': PUTC(c, '\\'); break;
+                    case '/':  PUTC(c, '/' ); break;
+                    case 'b':  PUTC(c, '\b'); break;
+                    case 'f':  PUTC(c, '\f'); break;
+                    case 'n':  PUTC(c, '\n'); break;
+                    case 'r':  PUTC(c, '\r'); break;
+                    case 't':  PUTC(c, '\t'); break;
+                    default:
+                        c->top = head;
+                        return TINY_PARSE_INVALID_STRING_ESCAPE;
+                }
+                break;
         case '\0':  // 如果没遇到 \" 而先遇到 \0 则代表字符串不合法（缺少结束的 \"）
             c->top = head;
             return TINY_PARSE_MISS_QUOTATION_MARK;
         default:
+            if ((unsigned char)ch < 0x20){
+                c->top = head;
+                return TINY_PARSE_INVALID_STRING_CHAR;
+            }
             PUTC(c, ch);
         }
     }
@@ -163,10 +182,10 @@ static int tiny_parse_value(tiny_context* c, tiny_node* node){
     case 't': return tiny_parse_true(c, node);
     case 'f': return tiny_parse_false(c, node);
     default:  return tiny_parse_number(c, node);
+    case '"': return tiny_parse_string(c, node);
     case '\0': return TINY_PARSE_EXPECT_VALUE;  // '\0' 代表字符串结束符，因此可以判断是否为空
     }
 }
-
 
 int tiny_parse(tiny_node* node, const char* json){
     tiny_context c;
@@ -204,9 +223,37 @@ tiny_type tiny_get_type(const tiny_node* node){
     return node->type;
 }
 
+int tiny_get_boolean(const tiny_node* node){
+    assert(node != nullptr && (node->type == TINY_FALSE || node->type == TINY_TRUE));
+    return node->type == TINY_TRUE;  // 巧妙！
+}
+
+void tiny_set_boolean(tiny_node* node, int b){
+    assert(node != nullptr);
+    tiny_free(node);
+    node->type = b ? TINY_TRUE : TINY_FALSE;  // 巧妙！
+}
+
 double tiny_get_number(const tiny_node* node){
-    assert(node != nullptr && tiny_get_type(node) == TINY_NUMBER);
+    assert(node != nullptr && node->type == TINY_NUMBER);
     return node->n;
+}
+
+void tiny_set_number(tiny_node* node, double n){
+    assert(node != nullptr);
+    tiny_free(node);
+    node->n = n;
+    node->type = TINY_NUMBER;
+}
+
+const char* tiny_get_string(const tiny_node* node){
+    assert(node != nullptr && node->type == TINY_STRING);
+    return node->s.s;
+}
+
+size_t tiny_get_string_length(const tiny_node* node){
+    assert(node != nullptr && node->type == TINY_STRING);
+    return node->s.len;
 }
 
 /// @brief 设置 json 节点中的值为指定字符串

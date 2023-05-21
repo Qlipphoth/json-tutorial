@@ -16,10 +16,8 @@ typedef struct {
     union 
     {
         struct { char* s; size_t len; }s;
-        double n;
+        double n;  // 存放节点中的数字（如果数据类型为数字的话）
     };
-    
-    double n;  // 存放节点中的数字（如果数据类型为数字的话）
     tiny_type type;
 }tiny_node;
 
