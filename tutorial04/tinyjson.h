@@ -30,8 +30,10 @@ enum {
     TINY_PARSE_ROOT_NOT_SINGULAR,  // 一个值之后除了空白还有其他字符 
     TINY_PARSE_NUMBER_TOO_BIG,  // 解析出的数字过大 
     TINY_PARSE_MISS_QUOTATION_MARK,  // 缺少字符串结尾的 \"
-    TINY_PARSE_INVALID_STRING_ESCAPE,  // 转义符 / 使用错误
-    TINY_PARSE_INVALID_STRING_CHAR  // 非法字符
+    TINY_PARSE_INVALID_STRING_ESCAPE,  // 无效的字符串转义
+    TINY_PARSE_INVALID_STRING_CHAR,  // 无效字符
+    TINY_PARSE_INVALID_UNICODE_HEX,  // 非法的十六进制数
+    TINY_PARSE_INVALID_UNICODE_SURROGATE  // 非法的代理对范围
 };
 
 // 提供 json 节点的初始化宏
