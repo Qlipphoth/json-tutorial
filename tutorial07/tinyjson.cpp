@@ -6,16 +6,14 @@
 #include <cstring>    /* memcpy() */
 #include <cctype>  /* isxdigit() */
 #include <string>  /* stoi() */
-#include <iostream>
-using namespace std;
 
 // 定义缓冲区栈的默认大小
 #ifndef TINY_PARSE_STACK_INIT_SIZE
 #define TINY_PARSE_STACK_INIT_SIZE 256
 #endif 
 
-#ifndef LEPT_PARSE_STRINGIFY_INIT_SIZE
-#define LEPT_PARSE_STRINGIFY_INIT_SIZE 256
+#ifndef TINY_PARSE_STRINGIFY_INIT_SIZE
+#define TINY_PARSE_STRINGIFY_INIT_SIZE 256
 #endif
 
 #define EXPECT(c, ch)       do { assert(*c->json == (ch)); c->json++; } while(0)
@@ -403,8 +401,67 @@ int tiny_parse(tiny_node* node, const char* json){
     return ret;
 }
 
+// 字符串化未优化版本
+static void tiny_stringify_string(tiny_context* c, const char* s, size_t len, bool) {
+    size_t i;
+    assert(s != nullptr);
+    PUTC(c, '"');
+    for (i = 0; i < len; i++) {
+        unsigned char ch = (unsigned char)s[i];
+        switch (ch) {
+            case '\"': PUTS(c, "\\\"", 2); break;
+            case '\\': PUTS(c, "\\\\", 2); break;
+            case '\b': PUTS(c, "\\b",  2); break;
+            case '\f': PUTS(c, "\\f",  2); break;
+            case '\n': PUTS(c, "\\n",  2); break;
+            case '\r': PUTS(c, "\\r",  2); break;
+            case '\t': PUTS(c, "\\t",  2); break;
+            default:
+                if (ch < 0x20) {
+                    char buffer[7];
+                    sprintf(buffer, "\\u%04x", ch);
+                    PUTS(c, buffer, 6);
+                }
+                else PUTC(c, s[i]);
+        }
+    }
+    PUTC(c, '"');
+}
+
+/// @brief 优化后的 stringify 函数，提前开辟足够的空间确保不会反复查询空间是否足够
+/// @param c tiny_context
+/// @param s json 值中的字符串
+/// @param len 字符串长度
 static void tiny_stringify_string(tiny_context* c, const char* s, size_t len) {
-        
+    static const char hex_digits[] = { '0', '1', '2', '3', '4', '5', '6', 
+        '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F' };
+    size_t i, size;
+    char *head, *p;
+    assert(s != nullptr);
+    // 开辟足够大的空间 "\u00xx..."
+    p = head = (char*)tiny_context_push(c, size = len * 6 + 2);
+    *p++ = '"';
+    for (i = 0; i < len; i++) {
+        unsigned char ch = (unsigned char)s[i];
+        switch (ch) {
+            case '\"': *p++ = '\\'; *p++ = '\"'; break;
+            case '\\': *p++ = '\\'; *p++ = '\\'; break;
+            case '\b': *p++ = '\\'; *p++ = 'b';  break;
+            case '\f': *p++ = '\\'; *p++ = 'f';  break;
+            case '\n': *p++ = '\\'; *p++ = 'n';  break;
+            case '\r': *p++ = '\\'; *p++ = 'r';  break;
+            case '\t': *p++ = '\\'; *p++ = 't';  break;
+            default:
+                if (ch < 0x20) {
+                    *p++ = '\\'; *p++ = 'u'; *p++ = '0'; *p++ = '0';
+                    *p++ = hex_digits[ch >> 4];  // 写入十位
+                    *p++ = hex_digits[ch & 15];  // 写入个位
+                }
+                else *p++ = s[i];
+        }
+    }
+    *p++ = '"';
+    c->top -= size - (p - head);  // 按实际输出量调整堆栈指针
 }
 
 static void tiny_stringify_value(tiny_context* c, const tiny_node* node) {
@@ -416,13 +473,38 @@ static void tiny_stringify_value(tiny_context* c, const tiny_node* node) {
         case TINY_NUMBER:   c->top -= 32 - sprintf((char*)tiny_context_push(c, 32), "%.17g", node->n); break;
         case TINY_STRING:   tiny_stringify_string(c, node->s.s, node->s.len); break;
         case TINY_ARRAY:
-
+            PUTC(c, '[');
+            for (size_t i = 0; i < node->a.size; i++) {
+                if (i > 0) PUTC(c, ',');
+                tiny_stringify_value(c, &node->a.e[i]);
+            }
+            PUTC(c, ']');
             break;
         case TINY_OBJECT:
-
+            PUTC(c, '{');
+            for (size_t i = 0; i < node->o.size; i++) {
+                if (i > 0) PUTC(c, ',');
+                PUTC(c, '\"');
+                PUTS(c, node->o.m[i].key, node->o.m[i].keylen);
+                PUTC(c, '\"');
+                PUTC(c, ':');
+                tiny_stringify_value(c, &node->o.m[i].value);
+            }
+            PUTC(c, '}');
             break;
         default: assert(0 && "invalid type");
     }
+}
+
+char* tiny_stringify(const tiny_node* node, size_t* length) {
+    tiny_context c;
+    assert(node != nullptr);
+    c.stack = (char*)malloc(c.size = TINY_PARSE_STRINGIFY_INIT_SIZE);
+    c.top = 0;
+    tiny_stringify_value(&c, node);
+    if (length) *length = c.top;  // 当传入非空指针时，就能获得生成 JSON 的长度
+    PUTC(&c, '\0');
+    return c.stack;
 }
 
 void tiny_free(tiny_node* node) {

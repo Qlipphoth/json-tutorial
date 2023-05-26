@@ -64,6 +64,8 @@ enum {
 /// @return 解析状态码
 int tiny_parse(tiny_node* node, const char* json);
 
+char* tiny_stringify(const tiny_node* node, size_t* length);
+
 /// @brief 释放节点内存
 /// @param node json 节点
 void tiny_free(tiny_node* node);
