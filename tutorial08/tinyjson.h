@@ -9,6 +9,8 @@
 typedef enum { TINY_NULL, TINY_FALSE, TINY_TRUE, TINY_NUMBER, TINY_STRING, 
     TINY_ARRAY, TINY_OBJECT } tiny_type;
 
+#define TINY_KEY_NOT_EXIST ((size_t) - 1)
+
 // 定义 json 中的节点结构 tiny_node，节点中包含 tiny_type 类型的值
 // 教程中名称是 _value，但我总觉得变扭，改用 node
 typedef struct tiny_node tiny_node;  // 前向声明（forward declare）tiny_node 类型
@@ -33,8 +35,6 @@ struct tiny_member
     char* key; size_t keylen; /* member key string, key string length */
     tiny_node value;           /* member value */
 };
-
-
 
 /// @brief 枚举类型，代表解析状态码
 enum {
@@ -94,7 +94,6 @@ void tiny_popback_array_element(tiny_node* node);
 tiny_node* tiny_insert_array_element(tiny_node* node, size_t index);
 void tiny_erase_array_element(tiny_node* node, size_t index, size_t count);
 
-
 void tiny_set_object(tiny_node* node, size_t capacity);
 size_t tiny_get_object_size(const tiny_node* node);
 size_t tiny_get_object_capacity(const tiny_node* node);
@@ -106,7 +105,7 @@ size_t tiny_get_object_key_length(const tiny_node* node, size_t index);
 tiny_node* tiny_get_object_value(const tiny_node* node, size_t index);
 size_t tiny_find_object_index(const tiny_node* node, const char* key, size_t klen);
 tiny_node* tiny_find_object_value(tiny_node* node, const char* key, size_t klen);
-tiny_node* tiny_set_object_value(tiny_node* node, const char* key, size_t klen);
-void tiny_remove_object_value(tiny_node* node, size_t index);
+tiny_node* tiny_set_object_key(tiny_node* node, const char* key, size_t klen);
+void tiny_remove_object(tiny_node* node, size_t index);
 
 #endif

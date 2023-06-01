@@ -192,11 +192,11 @@ static void test_parse_object() {
     tiny_node node;
     size_t i;
 
-    // tiny_init(&node);
-    // EXPECT_EQ_INT(TINY_PARSE_OK, tiny_parse(&node, " { } "));
-    // EXPECT_EQ_INT(TINY_OBJECT, tiny_get_type(&node));
-    // EXPECT_EQ_SIZE_T(0, tiny_get_object_size(&node));
-    // tiny_free(&node);
+    tiny_init(&node);
+    EXPECT_EQ_INT(TINY_PARSE_OK, tiny_parse(&node, " { } "));
+    EXPECT_EQ_INT(TINY_OBJECT, tiny_get_type(&node));
+    EXPECT_EQ_SIZE_T(0, tiny_get_object_size(&node));
+    tiny_free(&node);
 
     tiny_init(&node);
     EXPECT_EQ_INT(TINY_PARSE_OK, tiny_parse(&node,
@@ -282,7 +282,7 @@ static void test_parse_invalid_value(){
 static void test_parse_root_not_singular(){
     TEST_ERROR(TINY_PARSE_ROOT_NOT_SINGULAR, "null x");
 
-#if 0
+#if 1
     /* invalid number */
     TEST_ERROR(TINY_PARSE_ROOT_NOT_SINGULAR, "0123"); /* after zero should be '.' , 'E' , 'e' or nothing */
     TEST_ERROR(TINY_PARSE_ROOT_NOT_SINGULAR, "0x0");
@@ -510,11 +510,160 @@ static void test_access_string() {
     tiny_free(&node);
 }
 
+static void test_access_array() {
+    tiny_node a, e;
+    size_t i, j;
+
+    tiny_init(&a);
+
+    for (j = 0; j <= 5; j += 5) {
+        tiny_set_array(&a, j);
+        EXPECT_EQ_SIZE_T(0, tiny_get_array_size(&a));
+        EXPECT_EQ_SIZE_T(j, tiny_get_array_capacity(&a));
+        for (i = 0; i < 10; i++) {
+            tiny_init(&e);
+            tiny_set_number(&e, i);
+            tiny_move(tiny_pushback_array_element(&a), &e);
+            tiny_free(&e);
+        }
+
+        EXPECT_EQ_SIZE_T(10, tiny_get_array_size(&a));
+        for (i = 0; i < 10; i++)
+            EXPECT_EQ_DOUBLE((double)i, tiny_get_number(tiny_get_array_element(&a, i)));
+    }
+
+    tiny_popback_array_element(&a);
+    EXPECT_EQ_SIZE_T(9, tiny_get_array_size(&a));
+    for (i = 0; i < 9; i++)
+        EXPECT_EQ_DOUBLE((double)i, tiny_get_number(tiny_get_array_element(&a, i)));
+
+    tiny_erase_array_element(&a, 4, 0);
+    EXPECT_EQ_SIZE_T(9, tiny_get_array_size(&a));
+    for (i = 0; i < 9; i++)
+        EXPECT_EQ_DOUBLE((double)i, tiny_get_number(tiny_get_array_element(&a, i)));
+
+    tiny_erase_array_element(&a, 8, 1);
+    EXPECT_EQ_SIZE_T(8, tiny_get_array_size(&a));
+    for (i = 0; i < 8; i++)
+        EXPECT_EQ_DOUBLE((double)i, tiny_get_number(tiny_get_array_element(&a, i)));
+
+    tiny_erase_array_element(&a, 0, 2);
+    EXPECT_EQ_SIZE_T(6, tiny_get_array_size(&a));
+    for (i = 0; i < 6; i++)
+        EXPECT_EQ_DOUBLE((double)i + 2, tiny_get_number(tiny_get_array_element(&a, i)));
+
+    for (i = 0; i < 2; i++) {
+        tiny_init(&e);
+        tiny_set_number(&e, i);
+        tiny_move(tiny_insert_array_element(&a, i), &e);
+        tiny_free(&e);
+    }
+    
+    EXPECT_EQ_SIZE_T(8, tiny_get_array_size(&a));
+    for (i = 0; i < 8; i++)
+        EXPECT_EQ_DOUBLE((double)i, tiny_get_number(tiny_get_array_element(&a, i)));
+
+    EXPECT_TRUE(tiny_get_array_capacity(&a) > 8);
+    tiny_shrink_array(&a);
+    EXPECT_EQ_SIZE_T(8, tiny_get_array_capacity(&a));
+    EXPECT_EQ_SIZE_T(8, tiny_get_array_size(&a));
+    for (i = 0; i < 8; i++)
+        EXPECT_EQ_DOUBLE((double)i, tiny_get_number(tiny_get_array_element(&a, i)));
+
+    tiny_set_string(&e, "Hello", 5);
+    tiny_move(tiny_pushback_array_element(&a), &e);     /* Test if element is freed */
+    tiny_free(&e);
+
+    i = tiny_get_array_capacity(&a);
+    tiny_clear_array(&a);
+    EXPECT_EQ_SIZE_T(0, tiny_get_array_size(&a));
+    EXPECT_EQ_SIZE_T(i, tiny_get_array_capacity(&a));   /* capacity remains unchanged */
+    tiny_shrink_array(&a);
+    EXPECT_EQ_SIZE_T(0, tiny_get_array_capacity(&a));
+
+    tiny_free(&a);
+}
+
+static void test_access_object() {
+#if 1
+    tiny_node o, v, *pv;
+    size_t i, j, index;
+
+    tiny_init(&o);
+
+    for (j = 0; j <= 5; j += 5) {
+        tiny_set_object(&o, j);
+        EXPECT_EQ_SIZE_T(0, tiny_get_object_size(&o));
+        EXPECT_EQ_SIZE_T(j, tiny_get_object_capacity(&o));
+        for (i = 0; i < 10; i++) {
+            char key[2] = "a";
+            key[0] += i;  // a b c d ...
+            tiny_init(&v);
+            tiny_set_number(&v, i);
+            tiny_move(tiny_set_object_key(&o, key, 1), &v);  // {'a' : 1 , 'b' : 2 , ...}
+            tiny_free(&v);
+        }
+        EXPECT_EQ_SIZE_T(10, tiny_get_object_size(&o));
+        for (i = 0; i < 10; i++) {
+            char key[] = "a";
+            key[0] += i;
+            index = tiny_find_object_index(&o, key, 1);
+            EXPECT_TRUE(index != TINY_KEY_NOT_EXIST);
+            pv = tiny_get_object_value(&o, index);
+            EXPECT_EQ_DOUBLE((double)i, tiny_get_number(pv));
+        }
+    }
+
+    index = tiny_find_object_index(&o, "j", 1);    
+    EXPECT_TRUE(index != TINY_KEY_NOT_EXIST);
+    tiny_remove_object(&o, index);
+    index = tiny_find_object_index(&o, "j", 1);
+    EXPECT_TRUE(index == TINY_KEY_NOT_EXIST);
+    EXPECT_EQ_SIZE_T(9, tiny_get_object_size(&o));
+
+    index = tiny_find_object_index(&o, "a", 1);
+    EXPECT_TRUE(index != TINY_KEY_NOT_EXIST);
+    tiny_remove_object(&o, index);
+    index = tiny_find_object_index(&o, "a", 1);
+    EXPECT_TRUE(index == TINY_KEY_NOT_EXIST);
+    EXPECT_EQ_SIZE_T(8, tiny_get_object_size(&o));
+
+    EXPECT_TRUE(tiny_get_object_capacity(&o) > 8);
+    tiny_shrink_object(&o);
+    EXPECT_EQ_SIZE_T(8, tiny_get_object_capacity(&o));
+    EXPECT_EQ_SIZE_T(8, tiny_get_object_size(&o));
+    for (i = 0; i < 8; i++) {
+        char key[] = "a";
+        key[0] += i + 1;
+        EXPECT_EQ_DOUBLE((double)i + 1, tiny_get_number(tiny_get_object_value(&o, tiny_find_object_index(&o, key, 1))));
+    }
+
+    tiny_set_string(&v, "Hello", 5);
+    tiny_move(tiny_set_object_key(&o, "World", 5), &v); /* Test if element is freed */
+    tiny_free(&v);
+
+    pv = tiny_find_object_value(&o, "World", 5);
+    EXPECT_TRUE(pv != nullptr);
+    EXPECT_EQ_STRING("Hello", tiny_get_string(pv), tiny_get_string_length(pv));
+
+    i = tiny_get_object_capacity(&o);
+    tiny_clear_object(&o);
+    EXPECT_EQ_SIZE_T(0, tiny_get_object_size(&o));
+    EXPECT_EQ_SIZE_T(i, tiny_get_object_capacity(&o)); /* capacity remains unchanged */
+    tiny_shrink_object(&o);
+    EXPECT_EQ_SIZE_T(0, tiny_get_object_capacity(&o));
+
+    tiny_free(&o);
+#endif
+}
+
 static void test_access() {
     test_access_null();
     test_access_boolean();
     test_access_number();
     test_access_string();
+    test_access_array();
+    test_access_object();
 }
 
 int main(){

@@ -6,6 +6,7 @@
 #include <cstring>    /* memcpy() */
 #include <cctype>  /* isxdigit() */
 #include <string>  /* stoi() */
+#include <iostream>
 using namespace std;
 
 // 定义缓冲区栈的默认大小
@@ -394,6 +395,7 @@ int tiny_parse(tiny_node* node, const char* json){
     if ((ret = tiny_parse_value(&c, node)) == TINY_PARSE_OK){
         tiny_parse_whitespace(&c);  // 处理字符串后空格
         if (*c.json != '\0'){  // 处理完后指向的不是字符串的结束符，即后面还有其他字符
+            node->type = TINY_NULL;
             ret = TINY_PARSE_ROOT_NOT_SINGULAR;
         }
     }
@@ -514,13 +516,14 @@ char* tiny_stringify(const tiny_node* node, size_t* length) {
 /// @param src 源节点
 void tiny_copy(tiny_node* dst, tiny_node* src) {
     assert(src != nullptr && dst != nullptr && src != dst);
+    size_t i, size;
     switch (src->type) {
         case TINY_STRING:
             tiny_set_string(dst, src->s.s, src->s.len);
             break;
         case TINY_ARRAY:
             tiny_free(dst);
-            size_t size = src->a.size, i;
+            size = src->a.size;
             dst->a.size = size;
             dst->a.e = (tiny_node*)malloc(size * sizeof(tiny_node));
             for (i = 0; i < size; i++) {
@@ -530,7 +533,7 @@ void tiny_copy(tiny_node* dst, tiny_node* src) {
             break;
         case TINY_OBJECT:
             tiny_free(dst);
-            size_t size = src->o.size, i;
+            size = src->o.size;
             dst->o.size = size;
             dst->o.m = (tiny_member*)malloc(size * sizeof(tiny_member));
             for (i = 0; i < size; i++) {
@@ -558,7 +561,7 @@ void tiny_move(tiny_node* dst, tiny_node* src) {
 void tiny_swap(tiny_node* lhs, tiny_node* rhs) {
     assert(lhs != nullptr && rhs != nullptr);
     if (lhs != rhs) {
-        tiny_node* temp;
+        tiny_node temp;
         memcpy(&temp, lhs, sizeof(tiny_node));
         memcpy(lhs,   rhs, sizeof(tiny_node));
         memcpy(rhs, &temp, sizeof(tiny_node));
@@ -581,6 +584,7 @@ void tiny_free(tiny_node* node) {
             break;
         case TINY_OBJECT:
             for (i = 0; i < node->o.size; i++) {
+                free(node->o.m[i].key);
                 tiny_free(&node->o.m[i].value);
             }
             free(node->o.m);
@@ -699,7 +703,7 @@ size_t tiny_get_array_capacity(const tiny_node* node) {
 /// @brief 增大数组容量
 /// @param node json 节点
 /// @param capacity 数组容量
-void tiny_reverse_array(tiny_node* node, size_t capacity) {
+void tiny_reserve_array(tiny_node* node, size_t capacity) {
     assert(node != nullptr && node->type == TINY_ARRAY);
     if (node->a.capacity < capacity) {
         node->a.capacity = capacity;
@@ -737,32 +741,31 @@ tiny_node* tiny_get_array_element(const tiny_node* node, size_t index) {
 tiny_node* tiny_pushback_array_element(tiny_node* node) {
     assert(node != nullptr && node->type == TINY_ARRAY);
     if (node->a.size == node->a.capacity) 
-        tiny_reverse_array(node, node->a.capacity == 0 ? 1 : node->a.capacity * 2);
+        tiny_reserve_array(node, node->a.capacity == 0 ? 1 : node->a.capacity * 2);
     tiny_init(&node->a.e[node->a.size]);
-    return &node->a.e[node->a.size++];
+    return &node->a.e[node->a.size++];  // 此处顺带改变了 array 中 size 的大小
 }
 
 void tiny_popback_array_element(tiny_node* node) {
     assert(node != nullptr && node->type == TINY_ARRAY && node->a.size > 0);
-    tiny_free(&node->a.e[--node->a.size]);
+    tiny_free(&node->a.e[--node->a.size]);  // 此处顺带改变了 array 中 size 的大小
 }
 
-/// @brief 在数组的第 index 个位置插入一个元素
+/// @brief 在数组的第 index 个腾出位置
 /// @param node json 节点
 /// @param index 插入下标
-/// @return 插入后的节点指针
+/// @return 插入位置的节点指针
 tiny_node* tiny_insert_array_element(tiny_node* node, size_t index) {
     assert(node != nullptr && node->type == TINY_ARRAY && index <= node->a.size);
-    size_t i;
-    tiny_node* nxtNode = tiny_pushback_array_element(node);
-    tiny_node* curNode = nxtNode - 1;
-    for (i = 0; i < node->a.size - index; i++) {
-        tiny_move(nxtNode, curNode);
-        nxtNode--;
-        curNode--;
+    size_t i, size;
+    tiny_node e;  // 注意初始化两个指针在各自前面都要加 * 
+    tiny_init(&e);
+    tiny_move(tiny_pushback_array_element(node), &e);
+    size = node->a.size;
+    for (i = 0; i < node->a.size - index - 1; i++) {
+        tiny_swap(&node->a.e[size - 1 - i], &node->a.e[size - 2 - i]);
     }
-    memcpy(nxtNode, node, sizeof(tiny_node));
-    return nxtNode;
+    return &node->a.e[index];
 }
 
 void tiny_erase_array_element(tiny_node* node, size_t index, size_t count) {
@@ -771,13 +774,15 @@ void tiny_erase_array_element(tiny_node* node, size_t index, size_t count) {
     for (i = 0; i < num; i++) {
         tiny_swap(&node->a.e[index + i], &node->a.e[index + count + i]);
     }
-
     for (i = index + num; i < node->a.size; i++) {
         tiny_free(&node->a.e[i]);
     }
-    node->a.size = index + num + 1;
+    node->a.size = index + num;
 }
 
+/// @brief 将节点类型设置为对象, 并提供初始容量
+/// @param node json 节点
+/// @param capacity 初始容量
 void tiny_set_object(tiny_node* node, size_t capacity) {
     assert(node != nullptr);
     tiny_free(node);
@@ -794,23 +799,35 @@ size_t tiny_get_object_size(const tiny_node* node) {
 
 size_t tiny_get_object_capacity(const tiny_node* node) {
     assert(node != nullptr && node->type == TINY_OBJECT);
-    /* \todo */
-    return 0;
+    return node->o.capacity;
 }
 
 void tiny_reserve_object(tiny_node* node, size_t capacity) {
     assert(node != nullptr && node->type == TINY_OBJECT);
-    /* \todo */
+    if (node->o.capacity < capacity) {
+        node->o.capacity = capacity;
+        node->o.m = (tiny_member*)realloc(node->o.m, capacity * sizeof(tiny_member));
+    }
 }
 
 void tiny_shrink_object(tiny_node* node) {
     assert(node != nullptr && node->type == TINY_OBJECT);
-    /* \todo */
+    if (node->o.capacity > node->o.size) {
+        node->o.capacity = node->o.size;
+        node->o.m = (tiny_member*)realloc(node->o.m, node->o.capacity * sizeof(tiny_member));
+    }
 }
 
 void tiny_clear_object(tiny_node* node) {
     assert(node != nullptr && node->type == TINY_OBJECT);
-    /* \todo */
+    size_t i;
+    tiny_member *curm;
+    for (i = 0; i < node->o.size; i++) {
+        curm = &node->o.m[i];
+        free(curm->key);
+        tiny_free(&curm->value);
+    }
+    node->o.size = 0;
 }
 
 const char* tiny_get_object_key(const tiny_node* node, size_t index) {
@@ -829,4 +846,72 @@ tiny_node* tiny_get_object_value(const tiny_node* node, size_t index) {
     assert(node != nullptr && node->type == TINY_OBJECT);
     assert(index < node->o.size);
     return &node->o.m[index].value;
+}
+
+/// @brief 找到 json 中指定 key 的 object 节点下标
+/// @param node json 节点
+/// @param key 给定 key
+/// @param klen key 长度
+/// @return 找到的节点下标, 没找到的话返回 size_t - 1
+size_t tiny_find_object_index(const tiny_node* node, const char* key, size_t klen) {
+    size_t i;
+    assert(node != nullptr && node->type == TINY_OBJECT && key != nullptr);
+    for (i = 0; i < node->o.size; i++) {
+        if (node->o.m[i].keylen == klen && memcmp(node->o.m[i].key, key, klen) == 0)
+            return i;
+    }
+    return TINY_KEY_NOT_EXIST;
+}
+
+/// @brief 在 json 节点中找到对应 key 值 object 的 value
+/// @param node json 节点
+/// @param key 给定 key
+/// @param klen key 长度
+/// @return object.value
+tiny_node* tiny_find_object_value(tiny_node* node, const char* key, size_t klen) {
+    size_t index = tiny_find_object_index(node, key, klen);
+    return index != TINY_KEY_NOT_EXIST ? &node->o.m[index].value : nullptr;
+}
+
+tiny_member* tiny_pushback_object_member(tiny_node* node) {
+    assert(node != nullptr && node->type == TINY_OBJECT);
+    if (node->o.size == node->o.capacity) 
+        tiny_reserve_object(node, node->o.capacity == 0 ? 1 : node->o.capacity * 2);
+    tiny_init(&node->o.m[node->o.size].value);
+    return &node->o.m[node->o.size++];  // 此处顺带改变了 array 中 size 的大小
+}
+
+/// @brief 为给定 json 节点设置一个 key 为指定值的 object
+/// @param node json 节点
+/// @param key 指定 key
+/// @param klen key 长度
+/// @return 设置的 object.value
+tiny_node* tiny_set_object_key(tiny_node* node, const char* key, size_t klen) {
+    assert(node != nullptr && node->type == TINY_OBJECT);
+    tiny_node* res;
+    tiny_member* m;
+    if ((res = tiny_find_object_value(node, key, klen)) != nullptr) return res;  // 若已存在此键, 则直接返回
+    m = tiny_pushback_object_member(node);
+    memcpy(m->key = (char*)malloc(klen + 1), key, klen);  // 注意 key 一定要先分配空间
+    m->key[klen] = '\0';  // 加上结束符
+    m->keylen = klen;  // keylen 也要赋值！
+    return &m->value;
+}
+
+/// @brief 移除指定下标的对象
+/// @param node json 节点
+/// @param index 指定下标
+void tiny_remove_object(tiny_node* node, size_t index) {
+    assert(node != nullptr && node->type == TINY_OBJECT && index < node->o.size);
+    size_t i, klen;
+    for (i = index; i < node->o.size - 1; i++){
+        klen = node->o.m[i + 1].keylen;
+        memcpy(node->o.m[i].key = (char*)malloc(klen + 1), node->o.m[i + 1].key, klen);
+        node->o.m[i].key[klen] = '\0';
+        node->o.m[i].keylen = klen;
+        tiny_swap(&node->o.m[i].value, &node->o.m[i + 1].value);
+    }
+    free(node->o.m[i].key);
+    tiny_free(&node->o.m[i].value);
+    node->o.size--;
 }
